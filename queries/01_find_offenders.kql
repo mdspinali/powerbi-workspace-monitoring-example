@@ -1,0 +1,91 @@
+// =====================================================================
+// 01_find_offenders.kql
+// Standalone triage in Workspace Monitoring (no Capacity Metrics needed).
+// Surfaces the high-CPU, long-running, and failed semantic model operations,
+// plus rollups by report and by user. Run each block independently.
+//
+// Table: SemanticModelLogs  (workspace monitoring Eventhouse KQL DB)
+// Adjust the lookback window to taste.
+// =====================================================================
+
+let Lookback = 14d;
+// ---------------------------------------------------------------------
+// First: see which operation types actually exist in your window.
+// then optionally add a filter below.
+// ---------------------------------------------------------------------
+SemanticModelLogs
+| where Timestamp > ago(Lookback)
+| summarize Events = count(), TotalCpuMs = sum(CpuTimeMs) by OperationName, OperationDetailName
+| sort by TotalCpuMs desc;
+
+
+// ---------------------------------------------------------------------
+// Top 50 most expensive operations by CPU time.
+// EventText carries the DAX (for query operations).
+// ---------------------------------------------------------------------
+let Lookback = 14d;
+SemanticModelLogs
+| where Timestamp > ago(Lookback)
+| where isnotnull(CpuTimeMs)
+| project Timestamp, OperationId, OperationName, OperationDetailName,
+          CpuTimeMs, DurationMs, Status, Level,
+          ExecutingUser, ItemName, ItemId, ApplicationName,
+          WorkspaceName, CapacityId, DatasetMode, EventText
+| sort by CpuTimeMs desc
+| take 50;
+
+
+// ---------------------------------------------------------------------
+// Longest-running operations.
+// ---------------------------------------------------------------------
+let Lookback = 14d;
+SemanticModelLogs
+| where Timestamp > ago(Lookback)
+| where isnotnull(DurationMs)
+| project Timestamp, OperationId, OperationName, DurationMs, CpuTimeMs,
+          Status, ExecutingUser, ItemName, ApplicationName, DatasetMode, EventText
+| sort by DurationMs desc
+| take 50;
+
+
+// ---------------------------------------------------------------------
+// Failures / errors (good for "why did this report break" tickets).
+// ---------------------------------------------------------------------
+let Lookback = 14d;
+SemanticModelLogs
+| where Timestamp > ago(Lookback)
+| where Level in ("Error", "Warning") or StatusCode != 0
+| project Timestamp, OperationId, OperationName, Level, Status, StatusCode,
+          ExecutingUser, ItemName, ApplicationName, DatasetMode, EventText
+| sort by Timestamp desc
+| take 100;
+
+
+// ---------------------------------------------------------------------
+// Rollup: cost by report / semantic model.
+// ---------------------------------------------------------------------
+let Lookback = 14d;
+SemanticModelLogs
+| where Timestamp > ago(Lookback)
+| summarize Operations = count(),
+            TotalCpuMs = sum(CpuTimeMs),
+            TotalDurationMs = sum(DurationMs),
+            DistinctUsers = dcount(ExecutingUser)
+        by ItemName, ItemId, WorkspaceName
+| sort by TotalCpuMs desc;
+
+
+// ---------------------------------------------------------------------
+// Rollup: cost by user (the "who is responsible" view).
+// ---------------------------------------------------------------------
+let Lookback = 14d;
+SemanticModelLogs
+| where Timestamp > ago(Lookback)
+| where isnotempty(ExecutingUser)
+| summarize Operations = count(),
+            TotalCpuMs = sum(CpuTimeMs),
+            TotalDurationMs = sum(DurationMs),
+            DistinctReports = dcount(ItemId),
+            MaxCpuMs = max(CpuTimeMs)
+        by ExecutingUser
+| sort by TotalCpuMs desc;

@@ -1,0 +1,58 @@
+// =====================================================================
+// 02_drill_by_operationid.kql
+// Part B of the runbook: paste the Operation Id copied from the
+// Capacity Metrics "Timepoint detail" operation row, then run.
+//
+// OperationId in SemanticModelLogs == XmlaRequestId (documented).
+// =====================================================================
+
+// >>> Paste the Operation Id (GUID) from Capacity Metrics here <<<
+let TargetOperationId = "00000000-0000-0000-0000-000000000000";
+
+// ---------------------------------------------------------------------
+// Full detail for the operation, including the DAX text (EventText).
+// One operation can emit several rows (begin/step/end events); this
+// returns all of them so you see the full lifecycle.
+// ---------------------------------------------------------------------
+SemanticModelLogs
+| where OperationId == TargetOperationId
+| project Timestamp,
+          OperationName,
+          OperationDetailName,
+          Status,
+          StatusCode,
+          Level,
+          DurationMs,
+          CpuTimeMs,
+          ExecutingUser,
+          User,
+          CallerIpAddress,
+          ItemName,
+          ItemId,
+          ApplicationName,
+          ApplicationContext,     // contains the report id
+          DatasetMode,
+          WorkspaceName,
+          WorkspaceId,
+          CapacityId,
+          CorrelationId,
+          EventText               // the DAX query
+| sort by Timestamp asc;
+
+
+// ---------------------------------------------------------------------
+// Stitch across monitoring tables: take the CorrelationId from the rows
+// above and return everything sharing it (widens beyond a single request).
+// ---------------------------------------------------------------------
+let TargetOperationId = "00000000-0000-0000-0000-000000000000";
+let TheCorrelationId = toscalar(
+    SemanticModelLogs
+    | where OperationId == TargetOperationId
+    | top 1 by Timestamp asc
+    | project CorrelationId
+);
+SemanticModelLogs
+| where CorrelationId == TheCorrelationId
+| project Timestamp, WorkspaceMonitoringTableName, OperationName,
+          OperationDetailName, Status, DurationMs, CpuTimeMs, ExecutingUser, EventText
+| sort by Timestamp asc;
